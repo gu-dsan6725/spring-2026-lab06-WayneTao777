@@ -16,7 +16,6 @@ import httpx
 import polars as pl
 from mcp.server.fastmcp import FastMCP
 
-
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -117,8 +116,12 @@ def get_countries() -> str:
     ]
     """
     df = _load_data()
-    # TODO: Implement - return unique country codes and names as JSON string
-    pass
+    countries_df = (
+        df.select(["countryiso3code", "country"])
+        .unique()
+        .sort("countryiso3code")
+    )
+    return countries_df.write_json()
 
 
 @mcp.resource("data://indicators/{country_code}")
@@ -140,8 +143,10 @@ def get_country_indicators(country_code: str) -> str:
     Expected output: JSON array of indicator records for that country
     """
     df = _load_data()
-    # TODO: Implement - filter by country and return as JSON string
-    pass
+    filtered = df.filter(pl.col("countryiso3code") == country_code)
+    if filtered.is_empty():
+        return json.dumps({"error": f"Country not found: {country_code}"})
+    return filtered.write_json()
 
 
 # =============================================================================
@@ -185,8 +190,35 @@ def get_country_info(country_code: str) -> dict:
     - flag: "🇺🇸"
     """
     logger.info(f"Fetching country info for: {country_code}")
-    # TODO: Implement using _fetch_rest_countries()
-    pass
+    try:
+        data = _fetch_rest_countries(country_code)
+    except httpx.HTTPStatusError as e:
+        logger.error(f"API error for {country_code}: {e}")
+        return {"error": f"Country not found: {country_code}"}
+    except httpx.RequestError as e:
+        logger.error(f"Request failed for {country_code}: {e}")
+        return {"error": f"Request failed: {country_code}"}
+
+    name = data.get("name", {}).get("common")
+    capital_list = data.get("capital") or []
+    capital = capital_list[0] if capital_list else None
+    region = data.get("region")
+    subregion = data.get("subregion")
+    languages = list((data.get("languages") or {}).values())
+    currencies = list((data.get("currencies") or {}).keys())
+    population = data.get("population")
+    flag = data.get("flag")
+
+    return {
+        "name": name,
+        "capital": capital,
+        "region": region,
+        "subregion": subregion,
+        "languages": languages,
+        "currencies": currencies,
+        "population": population,
+        "flag": flag,
+    }
 
 
 @mcp.tool()
@@ -226,8 +258,30 @@ def get_live_indicator(
     - Handle case where no data exists for that year
     """
     logger.info(f"Fetching {indicator} for {country_code} in {year}")
-    # TODO: Implement using _fetch_world_bank_indicator()
-    pass
+    try:
+        data = _fetch_world_bank_indicator(country_code, indicator, year)
+    except httpx.HTTPStatusError as e:
+        logger.error(f"API error for {country_code} {indicator}: {e}")
+        return {"error": f"Indicator not found: {indicator} for {country_code}"}
+    except httpx.RequestError as e:
+        logger.error(f"Request failed for {country_code} {indicator}: {e}")
+        return {"error": f"Request failed: {country_code}"}
+
+    if not data:
+        return {
+            "error": f"No data found for {country_code} {indicator} in {year}"
+        }
+
+    # Pick the first entry (API usually returns the year we asked for)
+    entry = data[0]
+    return {
+        "country": country_code,
+        "country_name": entry.get("country", {}).get("value"),
+        "indicator": indicator,
+        "indicator_name": entry.get("indicator", {}).get("value"),
+        "year": int(entry.get("date")) if entry.get("date") else year,
+        "value": entry.get("value"),
+    }
 
 
 @mcp.tool()
@@ -260,8 +314,20 @@ def compare_countries(
     - Handle errors for individual countries (don't fail the whole request)
     """
     logger.info(f"Comparing {indicator} for countries: {country_codes}")
-    # TODO: Implement - call get_live_indicator for each country
-    pass
+    results: list[dict] = []
+    for code in country_codes:
+        result = get_live_indicator(code, indicator, year)
+        if "error" in result:
+            results.append({
+                "country": code,
+                "indicator": indicator,
+                "year": year,
+                "value": None,
+                "error": result["error"],
+            })
+        else:
+            results.append(result)
+    return results
 
 
 # =============================================================================

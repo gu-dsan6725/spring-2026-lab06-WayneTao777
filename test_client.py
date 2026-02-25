@@ -17,7 +17,6 @@ import sys
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -170,7 +169,9 @@ async def test_server() -> bool:
                     all_passed = False
 
                 # Test compare_countries
-                logger.info("\n[TEST] compare_countries(['USA', 'CHN', 'DEU'], 'SP.POP.TOTL', 2022)")
+                logger.info(
+                    "\n[TEST] compare_countries(['USA', 'CHN', 'DEU'], 'SP.POP.TOTL', 2022)"
+                )
                 try:
                     result = await session.call_tool(
                         "compare_countries",
